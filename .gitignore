@@ -1,0 +1,9 @@
+/src/**
+!/src/**/
+!/src/**/.gitkeep
+
+/docker/nginx/conf/**
+!/docker/nginx/conf/**/
+!/docker/nginx/conf/**/.gitkeep
+
+/.idea

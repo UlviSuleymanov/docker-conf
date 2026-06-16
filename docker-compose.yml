@@ -1,0 +1,59 @@
+services:
+
+  app:
+    build:
+      context: ./docker/php
+      dockerfile: Dockerfile
+    container_name: stack_app
+    volumes:
+      - ./src:/var/www/html        # entire src folder mapped
+    networks:
+      - stack_net
+    depends_on:
+      - db
+
+  nginx:
+    image: nginx:alpine
+    container_name: stack_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./src:/var/www/html
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d   # whole conf.d folder mapped
+    networks:
+      - stack_net
+    depends_on:
+      - app
+
+  db:
+    image: mariadb:11
+    container_name: stack_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - stack_db_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    networks:
+      - stack_net
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: stack_pma
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: root
+    ports:
+      - "8080:80"
+    networks:
+      - stack_net
+    depends_on:
+      - db
+
+networks:
+  stack_net:
+
+volumes:
+  stack_db_data:
