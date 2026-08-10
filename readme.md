@@ -1,39 +1,149 @@
-# Docker Stack for Laravel 13 (Windows)
+# Docker Stack for Laravel 13 (Ubuntu / Linux)
 
-A streamlined, standard Docker configuration featuring **PHP**, **Nginx**, and **MariaDB**, specifically fine-tuned for Laravel 13 applications running on Windows environments.
+A streamlined Docker configuration featuring **PHP 8.3**, **Nginx**, **MariaDB**, and **phpMyAdmin**, fine-tuned for running multiple Laravel 13 applications side by side on Ubuntu.
 
 ---
 
 ## 🚀 Initial Setup
 
-Before spinning up your containers, you need to establish the foundational directory structure and configure your base project environment.
-
 ### 1. Create Required Directories
-Ensure the following directories exist in your project root:
-* `/src` — This is where your Laravel project files will live.
-* `/docker/nginx/conf` — This is where your Nginx configuration files will be stored.
 
-### 2. Configure Your Project Name
-By default, the base project name is set to `stack`. If you want to customize this to match your root folder name, you must update the `docker-compose.yml` file:
-* Rename the `container_name` directives to match your project (e.g., change `stack_app` to `yourproject_app`).
-* Update the associated Docker network names to match this new naming convention.
+The stack expects this structure at the project root:
+
+```
+stack/
+├── docker/
+│   ├── nginx/
+│   │   └── conf.d/          # per-project nginx vhosts + example.conf.template
+│   └── php/
+│       ├── Dockerfile
+│       └── entrypoint.sh
+├── src/                      # your Laravel projects live here, one folder each
+├── docker-compose.yml
+└── .env                       # host UID/GID for the app container (see below)
+```
+
+Only `docker/nginx/conf.d/example.conf.template` is committed to this repo — real per-project `.conf` files and everything under `src/` are project-specific and gitignored (see `.gitignore` section below).
+
+### 2. Set Your Host UID/GID
+
+The `app` container maps `www-data` to your host user's UID/GID, so files created by the container (via `storage/`, `bootstrap/cache/`, artisan commands, etc.) aren't owned by a mismatched user when you edit them from your IDE outside the container.
+
+Create `.env` in the stack root:
+
+```env
+UID=1000
+GID=1000
+```
+
+Confirm your actual values with `id -u` and `id -g` — on a single-user Ubuntu install they're almost always `1000:1000`, but check before assuming.
+
+### 3. Configure Your Project Name
+
+The default project name is `stack`. To rename it, update `docker-compose.yml`:
+
+* Rename `container_name` for each service (e.g. `stack_app` → `yourproject_app`)
+* Rename the network under `networks:` (`stack_net` → `yourproject_net`) and its references in each service
+
+### 4. Build and Start
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
+`--no-cache` matters on first build so PHP extensions (intl, opcache, gd with jpeg/freetype support) install cleanly.
 
 ---
 
 ## ➕ Adding a New Project
 
-For every new Laravel project you place into the `/src` folder, follow these two steps to ensure local routing works correctly:
+### 1. Drop the project into `src/`
 
-### 1. Nginx Configuration
-Create a new configuration file for your project inside the `/docker/nginx/conf` directory.
-* You can duplicate the provided `example.conf` to use as a starting template.
-* Update the `server_name` and `root` directives inside the new file to point to your new project's public directory.
+```
+src/yourproject.local/
+```
 
-### 2. Windows Hosts File
-Map your local development domain to your localhost IP so your browser can resolve the application URL.
-* Open Notepad or your preferred text editor as an **Administrator**.
-* Open the Windows hosts file located at: `C:\Windows\System32\drivers\etc\hosts`
-* Add a new entry for your project at the bottom of the file. For example:
-    ```text
-    127.0.0.1    example.local
-    ```
+### 2. Nginx Configuration
+
+Duplicate the template and rename it (drop the `.template` extension so nginx actually loads it):
+
+```bash
+cp docker/nginx/conf.d/example.conf.template docker/nginx/conf.d/yourproject.local.conf
+```
+
+Update `server_name` and `root` inside the new file to match your project's folder and public path.
+
+### 3. Hosts File (Linux)
+
+Map the local domain to your loopback address:
+
+```bash
+sudo nano /etc/hosts
+```
+
+Add a line at the bottom (IP first, then hostname):
+
+```
+127.0.0.1   yourproject.local
+```
+
+No restart needed — takes effect on save.
+
+### 4. Project `.env`
+
+Inside `src/yourproject.local/.env`, point the database connection at the `db` **service name** — not `127.0.0.1` or `localhost`. Containers on the same Docker network don't share a loopback interface, so `127.0.0.1` from inside `app` only ever means the `app` container itself.
+
+```env
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=yourproject
+DB_USERNAME=root
+DB_PASSWORD=root
+```
+
+`DB_PASSWORD` must match `MYSQL_ROOT_PASSWORD` set in `docker-compose.yml` for the `db` service — phpMyAdmin's `PMA_PASSWORD` uses the same value, which is why it logs in without prompting you.
+
+### 5. Restart Nginx and Clear Config Cache
+
+```bash
+docker compose restart nginx
+docker compose exec app bash -c "cd /var/www/html/yourproject.local && php artisan config:clear"
+```
+
+Visit `http://yourproject.local`.
+
+---
+
+## 🗄️ Database Access
+
+* **From inside containers** (Laravel, artisan): `DB_HOST=db`, port `3306`
+* **From the host machine** (a desktop MySQL client, DBeaver, etc.): `127.0.0.1`, port `3307`
+* **phpMyAdmin**: `http://localhost:8080`
+
+---
+
+## 📄 .gitignore
+
+```gitignore
+# Per-project nginx vhosts — keep only the template
+docker/nginx/conf.d/*.conf
+!docker/nginx/conf.d/example.conf.template
+
+# Project source — clone/pull projects separately, don't commit them here
+src/*
+!src/.gitkeep
+
+# Host-level env (UID/GID are machine-specific)
+.env
+```
+
+---
+
+## 🔧 Notes
+
+* PHP extensions installed: `pdo_mysql`, `mbstring`, `exif`, `pcntl`, `bcmath`, `gd` (with jpeg/freetype support), `zip`, `intl`, `opcache`.
+* `opcache.validate_timestamps=1` is set for local dev so file changes show up without a container restart. For a production/VPS build, switch this to `0` for full opcache performance.
+* `client_max_body_size 64M;` is set in the nginx template to match PHP's `upload_max_filesize`/`post_max_size` — without it, nginx rejects large uploads before they even reach PHP, regardless of the PHP-side limits.
+* `entrypoint.sh` only `chown`/`chmod`s each project's `storage/` and `bootstrap/cache/` on container start, not the whole `src/` tree — keeps startup fast as you add more projects.
