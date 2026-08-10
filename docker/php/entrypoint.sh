@@ -1,8 +1,16 @@
 #!/bin/bash
 set -e
 
-chown -R www-data:www-data /var/www/html
-find /var/www/html -type d -exec chmod 775 {} \;
-find /var/www/html -type f -exec chmod 664 {} \;
+if [ -d /var/www/html ]; then
+    for project in /var/www/html/*/; do
+        for dir in storage bootstrap/cache; do
+            target="${project}${dir}"
+            if [ -d "$target" ]; then
+                chown -R www-data:www-data "$target"
+                chmod -R 775 "$target"
+            fi
+        done
+    done
+fi
 
 exec "$@"
