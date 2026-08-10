@@ -1,25 +1,30 @@
 services:
-
   app:
     build:
       context: ./docker/php
       dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
     container_name: stack_app
+    restart: unless-stopped
     volumes:
-      - ./src:/var/www/html        # entire src folder mapped
+      - ./src:/var/www/html
     networks:
       - stack_net
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   nginx:
     image: nginx:alpine
     container_name: stack_nginx
+    restart: unless-stopped
     ports:
       - "80:80"
     volumes:
       - ./src:/var/www/html
-      - ./docker/nginx/conf.d:/etc/nginx/conf.d   # whole conf.d folder mapped
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
     networks:
       - stack_net
     depends_on:
@@ -37,10 +42,16 @@ services:
       - "3307:3306"
     networks:
       - stack_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   phpmyadmin:
     image: phpmyadmin:latest
     container_name: stack_pma
+    restart: unless-stopped
     environment:
       PMA_HOST: db
       PMA_USER: root
