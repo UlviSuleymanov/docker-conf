@@ -1,58 +1,71 @@
-# Docker Stack for Laravel 13 (Ubuntu / Linux)
+# Docker Stack for Laravel 13 (macOS)
 
-A streamlined Docker configuration featuring **PHP 8.3**, **Nginx**, **MariaDB**, and **phpMyAdmin**, fine-tuned for running multiple Laravel 13 applications side by side on Ubuntu.
+A streamlined Docker configuration featuring **PHP 8.3**, **Nginx**, **MariaDB**, and **phpMyAdmin**, fine-tuned for running multiple Laravel 13 applications side by side on macOS.
+
+---
+
+## ⚙️ Prerequisites
+
+1. **Docker Desktop for Mac** — download and install from [docker.com](https://www.docker.com/products/docker-desktop/). There are separate installers for **Apple Silicon (M1/M2/M3/M4)** and **Intel** Macs — pick the right one for your chip.
+2. After installation, open Docker Desktop and let it finish starting up (the whale icon in the menu bar should stop animating).
+3. Open **Terminal** and confirm Docker is running:
+
+```bash
+docker --version
+docker compose version
+```
+
+### Recommended: Enable VirtioFS
+
+For best file I/O performance, make sure **VirtioFS** is your file sharing implementation:
+
+Docker Desktop → Settings (⚙️) → General → **Virtual Machine Options** → check **VirtioFS**.
+
+This is the default on recent Docker Desktop versions, but older installations may still use gRPC FUSE which is noticeably slower.
 
 ---
 
 ## 🚀 Initial Setup
 
-### 1. Create Required Directories
+### 1. Clone This Repository
 
-The stack expects this structure at the project root:
+Open **Terminal** and clone the repo:
+
+```bash
+git clone -b mac <repo-url> stack
+cd stack
+```
+
+### 2. Project Structure
+
+The stack expects this layout:
 
 ```
 stack/
 ├── docker/
 │   ├── nginx/
-│   │   └── conf.d/          # per-project nginx vhosts + example.conf.template
+│   │   └── conf.d/          # per-project nginx vhosts + example.conf template
 │   └── php/
 │       ├── Dockerfile
 │       └── entrypoint.sh
 ├── src/                      # your Laravel projects live here, one folder each
 ├── docker-compose.yml
-└── .env                       # host UID/GID for the app container (see below)
+└── readme.md
 ```
 
-Only `docker/nginx/conf.d/example.conf.template` is committed to this repo — real per-project `.conf` files and everything under `src/` are project-specific and gitignored (see `.gitignore` section below).
+Only `docker/nginx/example.conf` is committed — real per-project `.conf` files and everything under `src/` are project-specific and gitignored.
 
-### 2. Set Your Host UID/GID
-
-The `app` container maps `www-data` to your host user's UID/GID, so files created by the container (via `storage/`, `bootstrap/cache/`, artisan commands, etc.) aren't owned by a mismatched user when you edit them from your IDE outside the container.
-
-Create `.env` in the stack root:
-
-```env
-UID=1000
-GID=1000
-```
-
-Confirm your actual values with `id -u` and `id -g` — on a single-user Ubuntu install they're almost always `1000:1000`, but check before assuming.
-
-### 3. Configure Your Project Name
-
-The default project name is `stack`. To rename it, update `docker-compose.yml`:
-
-* Rename `container_name` for each service (e.g. `stack_app` → `yourproject_app`)
-* Rename the network under `networks:` (`stack_net` → `yourproject_net`) and its references in each service
-
-### 4. Build and Start
+### 3. Build and Start
 
 ```bash
 docker compose build --no-cache
 docker compose up -d
 ```
 
-`--no-cache` matters on first build so PHP extensions (intl, opcache, gd with jpeg/freetype support) install cleanly.
+`--no-cache` matters on first build so PHP extensions install cleanly.
+
+> [!NOTE]
+> If you're on an **Apple Silicon** Mac (M1/M2/M3/M4), the `php:8.3-fpm` and `mariadb:11` images have native `arm64` variants, so there's no emulation overhead — everything runs natively.
 
 ---
 
@@ -66,29 +79,46 @@ src/yourproject.local/
 
 ### 2. Nginx Configuration
 
-Duplicate the template and rename it (drop the `.template` extension so nginx actually loads it):
+Copy the example config and rename it:
 
 ```bash
-cp docker/nginx/conf.d/example.conf.template docker/nginx/conf.d/yourproject.local.conf
+cp docker/nginx/example.conf docker/nginx/conf.d/yourproject.local.conf
 ```
 
-Update `server_name` and `root` inside the new file to match your project's folder and public path.
+Open `docker/nginx/conf.d/yourproject.local.conf` in your editor and update `server_name` and `root` to match your project:
 
-### 3. Hosts File (Linux)
+```nginx
+server_name yourproject.local;
+root /var/www/html/yourproject.local/public;
+```
 
-Map the local domain to your loopback address:
+### 3. Hosts File (macOS)
+
+Map the local domain to your loopback address. Open Terminal and run:
 
 ```bash
 sudo nano /etc/hosts
 ```
 
-Add a line at the bottom (IP first, then hostname):
+Add a line at the bottom:
 
 ```
 127.0.0.1   yourproject.local
 ```
 
-No restart needed — takes effect on save.
+Save (`Ctrl+O`, `Enter`) and exit (`Ctrl+X`).
+
+**Alternative — one-liner:**
+
+```bash
+echo "127.0.0.1   yourproject.local" | sudo tee -a /etc/hosts
+```
+
+> [!NOTE]
+> macOS may cache DNS. If the domain doesn't resolve after editing the hosts file, flush the DNS cache:
+> ```bash
+> sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+> ```
 
 ### 4. Project `.env`
 
@@ -119,7 +149,7 @@ Visit `http://yourproject.local`.
 ## 🗄️ Database Access
 
 * **From inside containers** (Laravel, artisan): `DB_HOST=db`, port `3306`
-* **From the host machine** (a desktop MySQL client, DBeaver, etc.): `127.0.0.1`, port `3307`
+* **From the host machine** (a desktop MySQL client, TablePlus, Sequel Pro, DBeaver, etc.): `127.0.0.1`, port `3307`
 * **phpMyAdmin**: `http://localhost:8080`
 
 ---
@@ -135,8 +165,39 @@ docker/nginx/conf.d/*.conf
 src/*
 !src/.gitkeep
 
-# Host-level env (UID/GID are machine-specific)
-.env
+# IDE settings
+.idea
+```
+
+---
+
+## ⚠️ macOS-Specific Troubleshooting
+
+### Port 80 Already in Use
+
+macOS may have **AirPlay Receiver** listening on port 80 (on Monterey and later):
+
+System Settings → General → AirDrop & Handoff → **AirPlay Receiver** → turn it off.
+
+Alternatively, change the nginx port mapping in `docker-compose.yml` from `"80:80"` to e.g. `"8000:80"`.
+
+### Slow File I/O / Performance
+
+If pages load slowly, especially on projects with large `vendor/` or `node_modules/` directories:
+
+1. Make sure **VirtioFS** is enabled (see Prerequisites above).
+2. Run `composer install` inside the container so `vendor/` lives on the container's filesystem:
+   ```bash
+   docker compose exec app bash -c "cd /var/www/html/yourproject.local && composer install"
+   ```
+3. Apple Silicon Macs generally perform better than Intel Macs with Docker Desktop.
+
+### Permission Issues
+
+Docker Desktop for Mac handles file permission mapping automatically through its VM layer. If you hit permission errors on `storage/` or `bootstrap/cache/`, the entrypoint script should have fixed them on container start. You can also fix them manually:
+
+```bash
+docker compose exec app bash -c "cd /var/www/html/yourproject.local && chown -R www-data:www-data storage bootstrap/cache && chmod -R 775 storage bootstrap/cache"
 ```
 
 ---
@@ -147,3 +208,4 @@ src/*
 * `opcache.validate_timestamps=1` is set for local dev so file changes show up without a container restart. For a production/VPS build, switch this to `0` for full opcache performance.
 * `client_max_body_size 64M;` is set in the nginx template to match PHP's `upload_max_filesize`/`post_max_size` — without it, nginx rejects large uploads before they even reach PHP, regardless of the PHP-side limits.
 * `entrypoint.sh` only `chown`/`chmod`s each project's `storage/` and `bootstrap/cache/` on container start, not the whole `src/` tree — keeps startup fast as you add more projects.
+* No `.env` file is needed in the stack root on macOS — the UID/GID user mapping used on Linux is not required because Docker Desktop handles file permissions through its VM file sharing layer.
