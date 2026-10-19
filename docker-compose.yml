@@ -3,9 +3,6 @@ services:
     build:
       context: ./docker/php
       dockerfile: Dockerfile
-      args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
     container_name: stack_app
     restart: unless-stopped
     volumes:
